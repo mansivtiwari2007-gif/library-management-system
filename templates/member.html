@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head><title>Members</title></head>
+<body>
+    <h1>Library Members</h1>
+    <a href="/">Back to Home</a>
+    <p><a href="/members/add">Add a New Member</a></p>
+    <ul>
+        {% for member in members %}
+            <li>{{ member[1] }} — {{ member[2] }} — {{ member[3] }} (joined: {{ member[4] }})
+            <a href="/members/edit/{{ member[0] }}">Edit</a>
+            <a href="/members/delete/{{ member[0] }}">Delete</a>
+         </li>
+        {% endfor %}
+    </ul>
+</body>
+</html>

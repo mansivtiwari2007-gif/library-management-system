@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head><title>Add Member</title></head>
+<body>
+    <p><a href="/members">Back to Members</a></p>
+    <h1>Add a New Member</h1>
+
+    {% if error %}
+    <p style="color: red; background: #ffe6e6; padding: 10px; border: 1px solid red; border-radius: 4px;">Error adding member: {{ error }}</p>
+    {% endif %}
+
+    <form method="POST">
+        Name: <input type="text" name="name" required><br><br>
+        Email: <input type="email" name="email" required><br><br>
+        Phone: <input type="text" name="phone" required><br><br>
+        Membership Date: <input type="date" name="membership_date" required><br><br>
+        <button type="submit">Add member</button>
+    </form>
+</body>
+</html>

@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head><title>Add Book</title></head>
+<body>
+    <p><a href="/">Back to Home</a></p>
+    <h1>Add a New Book</h1>
+
+    {% if error %}
+    <p style="color: red; background: #ffe6e6; padding: 10px; border: 1px solid red; border-radius: 4px;">Error adding book: {{ error }}</p>
+    {% endif %}
+
+    <form method="POST">
+        Title: <input type="text" name="title" required><br><br>
+        Author: <input type="text" name="author" required><br><br>
+        Category: <input type="text" name="category" required><br><br>
+        Available copies: <input type="number" name="available_copies"><br><br>
+        <button type="submit">Add book</button>
+    </form>
+</body>
+</html>

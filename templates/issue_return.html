@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Issue & Return Records</title>
+</head>
+<body>
+
+    <h1>Issue & Return Records</h1>
+
+    {% if error %}
+        <p style="color:rgb(248, 106, 106);">{{ error }}</p>
+    {% endif %}
+
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            {% for message in messages %}
+                <p style="color:rgb(119, 218, 119)9, 143, 69);">{{ message }}</p>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <table border="1" cellpadding="10">
+        <tr>
+            <th>ID</th>
+            <th>Book</th>
+            <th>Member</th>
+            <th>Issue Date</th>
+            <th>Due Date</th>
+            <th>Return Date</th>
+            <th>Action</th>
+        </tr>
+
+        {% for record in records %}
+        <tr>
+            <td>{{ record[0] }}</td>
+            <td>{{ record[1] }}</td>
+            <td>{{ record[2] }}</td>
+            <td>{{ record[3] }}</td>
+            <td>{{ record[4] }}</td>
+            <td>
+                {% if record[5] %}
+                    {{ record[5] }}
+                {% else %}
+                    Not Returned
+                {% endif %}
+            </td>
+
+            <td>
+                {% if not record[5] %}
+                    <a href="/return/{{ record[0] }}">
+                        <button>Return Book</button>
+                    </a>
+                {% else %}
+                    Returned
+                {% endif %}
+            </td>
+        </tr>
+
+        {% endfor %}
+    </table>
+
+    <br>
+
+    <a href="/issue">
+        <button>Issue New Book</button>
+    </a>
+
+    <br><br>
+
+    <a href="/">Back to Books</a>
+
+</body>
+</html>

@@ -1,0 +1,261 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Library Fine Calculator</title>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: Arial, sans-serif;
+        }
+
+        body {
+            background: #f1f5fb;
+            color: #243047;
+            min-height: 100vh;
+        }
+
+        header {
+            background: #173b70;
+            color: white;
+            padding: 22px 7%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        header h1 {
+            font-size: 25px;
+        }
+
+        header a {
+            color: white;
+            text-decoration: none;
+            background: #315b95;
+            padding: 10px 16px;
+            border-radius: 7px;
+        }
+
+        .container {
+            max-width: 650px;
+            margin: 45px auto;
+            padding: 0 18px;
+        }
+
+        .card {
+            background: white;
+            padding: 32px;
+            border-radius: 15px;
+            box-shadow: 0 8px 25px rgba(30, 55, 90, 0.10);
+        }
+
+        .icon {
+            font-size: 42px;
+            text-align: center;
+            margin-bottom: 12px;
+        }
+
+        h2 {
+            text-align: center;
+            color: #173b70;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #718096;
+            margin-bottom: 28px;
+            line-height: 1.5;
+        }
+
+        label {
+            display: block;
+            font-weight: bold;
+            margin: 18px 0 8px;
+        }
+
+        input {
+            width: 100%;
+            padding: 13px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            font-size: 16px;
+            outline: none;
+        }
+
+        input:focus {
+            border-color: #315b95;
+        }
+
+        button {
+            width: 100%;
+            margin-top: 24px;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            background: #2457a6;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #173b70;
+        }
+
+        .result {
+            display: none;
+            margin-top: 25px;
+            padding: 22px;
+            text-align: center;
+            background: #e9f7ef;
+            border: 1px solid #b8e5c8;
+            border-radius: 10px;
+        }
+
+        .result p {
+            color: #276749;
+            margin-bottom: 8px;
+        }
+
+        .result h3 {
+            font-size: 32px;
+            color: #17663a;
+        }
+
+        .note {
+            margin-top: 20px;
+            padding: 13px;
+            background: #fff8e6;
+            border-radius: 8px;
+            color: #795b16;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        footer {
+            text-align: center;
+            padding: 20px;
+            color: #718096;
+            font-size: 13px;
+        }
+
+        @media (max-width: 500px) {
+            .card {
+                padding: 23px;
+            }
+
+            header h1 {
+                font-size: 21px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<header>
+    <h1>📚 Library Management System</h1>
+    <a href="/">← Back to Home</a>
+</header>
+
+<div class="container">
+    <div class="card">
+
+        <div class="icon">🧮</div>
+
+        <h2>Fine Calculator</h2>
+
+        <p class="subtitle">
+            Calculate the late return fine for your library books.
+        </p>
+
+        <form id="fineForm">
+            <label for="dueDate">Book Due Date</label>
+            <input type="date" id="dueDate" required>
+
+            <label for="returnDate">Book Return Date</label>
+            <input type="date" id="returnDate" required>
+
+            <label for="fineRate">Fine Per Day (₹)</label>
+            <input
+                type="number"
+                id="fineRate"
+                min="0"
+                step="0.01"
+                value="5"
+                required
+            >
+
+            <button type="submit">Calculate Fine</button>
+        </form>
+
+        <div class="result" id="result">
+            <p id="daysText">Late days: 0</p>
+            <p>Total Fine Amount</p>
+            <h3 id="fineAmount">₹0.00</h3>
+        </div>
+
+        <div class="note">
+            <strong>Note:</strong> The default fine rate is ₹5 per late
+            day. Change it according to your library's rules.
+            No fine is charged if the book is returned on or before
+            the due date.
+        </div>
+
+    </div>
+</div>
+
+<footer>
+    Library Management System | Fine Calculator
+</footer>
+
+<script>
+    document.getElementById("fineForm").addEventListener("submit", function(event) {
+        event.preventDefault();
+
+        const dueValue = document.getElementById("dueDate").value;
+        const returnValue = document.getElementById("returnDate").value;
+        const rate = Number(document.getElementById("fineRate").value);
+
+        if (!dueValue || !returnValue || rate < 0) {
+            alert("Please enter valid dates and fine rate.");
+            return;
+        }
+
+        const dueDate = new Date(dueValue + "T00:00:00Z");
+        const returnDate = new Date(returnValue + "T00:00:00Z");
+
+        if (returnDate < dueDate) {
+            alert("Return date cannot be earlier than the due date.");
+            return;
+        }
+
+        const millisecondsPerDay = 24 * 60 * 60 * 1000;
+        const lateDays = Math.floor(
+            (returnDate - dueDate) / millisecondsPerDay
+        );
+
+        const fine = lateDays * rate;
+
+        document.getElementById("daysText").textContent =
+            "Late days: " + lateDays;
+
+        document.getElementById("fineAmount").textContent =
+            "₹" + fine.toFixed(2);
+
+        document.getElementById("result").style.display = "block";
+    });
+</script>
+
+</body>
+</html>
+

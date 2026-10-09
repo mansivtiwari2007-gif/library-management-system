@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head><title>Edit Member</title></head>
+<body>
+    <h1>Edit Member</h1>
+    <a href="/members">Back to Members</a>
+    <form method="POST">
+        Name: <input type="text" name="name" value="{{ member[1] }}" required><br><br>
+        Email: <input type="email" name="email" value="{{ member[2] }}" required><br><br>
+        Phone: <input type="text" name="phone" value="{{ member[3] }}" required><br><br>
+        Membership Date: <input type="date" name="membership_date" value="{{ member[4] }}" required><br><br>
+        <button type="submit">Update Member</button>
+    </form>
+</body>
+</html>

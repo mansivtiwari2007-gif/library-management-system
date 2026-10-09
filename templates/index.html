@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Library Management System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header>
+        <h1>Library Management System</h1>
+    </header>
+
+    <p><a href="/add">Add a New Book</a></p>
+
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+    <p style="color: green; background: #e6ffe6; padding: 10px; border: 1px solid green; border-radius: 4px;">{{ messages[0] }}</p>
+    {% endif %}
+    {% endwith %}
+
+    <h1>Welcome to the Library</h1>
+    <a href="/members">View Members</a>
+<br><br>
+
+<a href="/add">Add a New Book</a>
+<br><br>
+
+<a href="/issue">Issue a Book</a>
+<br><br>
+<a href="/issue-return">View Issue/Return Records</a>
+<br><br>
+
+<a href="/dashboard">Dashboard</a>
+<br><br>
+<br><br>
+
+<a href="/search">Search Books</a>
+<br><br>
+<a href="/fine-calculator">🧮 Fine Calculator</a>
+<br><br>
+
+
+{% if error %}
+    <p style="color: red;">Database error: {{ error }}</p>
+{% endif %}
+    {% if books %}
+    <ul>
+    {% for book in books %}
+        <li>{{ book[1] }} by {{ book[2] }} ({{ book[3] }}) — {{ book[4] }} copies available
+            <a href="/edit/{{ book[0]}}">Edit</a>
+            <a href="/delete/{{ book[0]}}">delete</a>
+
+        </li>
+    {% endfor %}
+    </ul>
+    {% else %}
+    <p>No books found. Check the database connection and table contents.</p>
+    {% endif %}
+</body>
+</html>

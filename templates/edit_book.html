@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head><title>Edit Book</title></head>
+<body>
+    <p><a href="/">Back to Home</a></p>
+    <h1>Edit Book</h1>
+
+    {% if error %}
+    <p style="color: red; background: #ffe6e6; padding: 10px; border: 1px solid red; border-radius: 4px;">Error updating book: {{ error }}</p>
+    {% endif %}
+
+    {% if book %}
+    <form method="POST">
+        Title: <input type="text" name="title" value="{{ book[0] }}" required><br><br>
+        Author: <input type="text" name="author" value="{{ book[1] }}" required><br><br>
+        Category: <input type="text" name="category" value="{{ book[2] }}" required><br><br>
+        Available copies: <input type="number" name="available_copies" value="{{ book[3] }}" required><br><br>
+        <button type="submit">Update Book</button>
+    </form>
+    {% endif %}
+</body>
+</html>

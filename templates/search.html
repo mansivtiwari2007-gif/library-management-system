@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Search Books</title>
+</head>
+
+<body>
+
+    <h1>Search Books</h1>
+
+    <form method="GET" action="/search">
+
+        <input
+            type="text"
+            name="q"
+            placeholder="Search by title, author or category"
+            value="{{ query }}"
+        >
+
+        <button type="submit">Search</button>
+
+    </form>
+
+    <br>
+
+    {% if error %}
+        <p style="color:red;">{{ error }}</p>
+    {% endif %}
+
+    {% if query %}
+        <h3>Search Results for: {{ query }}</h3>
+    {% endif %}
+
+    <table border="1" cellpadding="8">
+
+        <tr>
+            <th>ID</th>
+            <th>Title</th>
+            <th>Author</th>
+            <th>Category</th>
+            <th>Available Copies</th>
+        </tr>
+
+        {% for book in books %}
+
+        <tr>
+            <td>{{ book[0] }}</td>
+            <td>{{ book[1] }}</td>
+            <td>{{ book[2] }}</td>
+            <td>{{ book[3] }}</td>
+            <td>{{ book[4] }}</td>
+        </tr>
+
+        {% else %}
+
+        <tr>
+            <td colspan="5">No books found.</td>
+        </tr>
+
+        {% endfor %}
+
+    </table>
+
+    <br>
+
+    <a href="/">Back to Home</a>
+
+</body>
+</html>
