@@ -1,599 +1,475 @@
-from flask import Flask, render_template, request, redirect, flash, session
-import mysql.connector
+import os
+from datetime import date
+from functools import wraps
+
+import psycopg
+from flask import (
+    Flask, render_template, request, redirect,
+    url_for, session, flash
+)
+from psycopg.rows import dict_row
 
 app = Flask(__name__)
-app.secret_key = "library-app-secret"  # needed for flash messages
+app.secret_key = os.environ.get("SECRET_KEY", "library-project-secret-key")
 
 
+# PostgreSQL connection on Render
 def get_db_connection():
-    return mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="",
-        database="library_db",
-        use_pure=True  # required on Python 3.14: C extension segfaults during connect
+    database_url = os.environ.get("DATABASE_URL")
+
+    if not database_url:
+        raise RuntimeError(
+            "DATABASE_URL is missing. Set it in Render Environment."
+        )
+
+    return psycopg.connect(
+        database_url,
+        sslmode="require",
+        row_factory=dict_row
     )
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "").strip()
-
-        conn = None
-
-        try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-
-            cursor.execute(
-                "SELECT id, username FROM users WHERE username = %s AND password = %s",
-                (username, password)
-            )
-
-            user = cursor.fetchone()
-
-            if user:
-                session["user_id"] = user[0]
-                session["username"] = user[1]
-                return redirect("/")
-
-            return render_template(
-                "login.html",
-                error="Invalid username or password."
-            )
-
-        except Exception as err:
-            print("Login error:", err)
-            return render_template("login.html", error=str(err))
-
-        finally:
-            if conn is not None:
-                conn.close()
-
-    return render_template("login.html")
 
 
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect("/login")
+# Create tables if they do not exist
+def init_db():
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    username VARCHAR(100) UNIQUE NOT NULL,
+                    password VARCHAR(255) NOT NULL
+                )
+            """)
 
-@app.before_request
-def require_login():
-    if request.endpoint in ["login", "static"]:
-        return
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS books (
+                    id SERIAL PRIMARY KEY,
+                    title VARCHAR(200) NOT NULL,
+                    author VARCHAR(200) NOT NULL,
+                    quantity INTEGER NOT NULL DEFAULT 1
+                )
+            """)
 
-    if "user_id" not in session:
-        return redirect("/login")
-def get_books():
-    books = []
-    error = None
-    conn = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, title, author, category, available_copies FROM books")
-        books = cursor.fetchall()
-    except Exception as err:
-        error = str(err)
-        print("Database error:", error)
-    finally:
-        if conn is not None:
-            conn.close()
-    return books, error
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS members (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(200) NOT NULL,
+                    email VARCHAR(200),
+                    phone VARCHAR(30)
+                )
+            """)
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS issue_return (
+                    id SERIAL PRIMARY KEY,
+                    book_id INTEGER REFERENCES books(id),
+                    member_id INTEGER REFERENCES members(id),
+                    issue_date DATE DEFAULT CURRENT_DATE,
+                    return_date DATE,
+                    fine NUMERIC(10, 2) DEFAULT 0
+                )
+            """)
+
+
+# Login protection
+def login_required(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if "username" not in session:
+            return redirect(url_for("login"))
+        return func(*args, **kwargs)
+    return wrapper
 
 
 @app.route("/")
 def home():
-    books, error = get_books()
-    return render_template("index.html", books=books, error=error)
+    if "username" in session:
+        return redirect(url_for("dashboard"))
+    return redirect(url_for("login"))
 
 
+# Login
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT id, username, password FROM users "
+                        "WHERE username = %s",
+                        (username,)
+                    )
+                    user = cur.fetchone()
+
+            if user and user["password"] == password:
+                session["username"] = user["username"]
+                session["user_id"] = user["id"]
+                return redirect(url_for("dashboard"))
+
+            flash("Invalid username or password.")
+
+        except Exception as e:
+            app.logger.exception("Login database error")
+            flash("Database connection error. Please check Render logs.")
+
+    return render_template("login.html")
+
+
+# Logout
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+# Dashboard
+@app.route("/dashboard")
+@login_required
+def dashboard():
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS total FROM books")
+                total_books = cur.fetchone()["total"]
+
+                cur.execute("SELECT COUNT(*) AS total FROM members")
+                total_members = cur.fetchone()["total"]
+
+                cur.execute("""
+                    SELECT COUNT(*) AS total FROM issue_return
+                    WHERE return_date IS NULL
+                """)
+                issued_books = cur.fetchone()["total"]
+
+                cur.execute("""
+                    SELECT COUNT(*) AS total FROM issue_return
+                    WHERE return_date IS NOT NULL
+                """)
+                returned_books = cur.fetchone()["total"]
+
+        return render_template(
+            "dashboard.html",
+            total_books=total_books,
+            total_members=total_members,
+            issued_books=issued_books,
+            returned_books=returned_books,
+            username=session["username"]
+        )
+
+    except Exception:
+        app.logger.exception("Dashboard database error")
+        return "Database error. Please check Render logs.", 500
+
+
+# View books
+@app.route("/books")
+@login_required
+def books():
+    search = request.args.get("search", "").strip()
+
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            if search:
+                cur.execute("""
+                    SELECT * FROM books
+                    WHERE title ILIKE %s OR author ILIKE %s
+                    ORDER BY id DESC
+                """, (f"%{search}%", f"%{search}%"))
+            else:
+                cur.execute("SELECT * FROM books ORDER BY id DESC")
+
+            all_books = cur.fetchall()
+
+    return render_template("books.html", books=all_books, search=search)
+
+
+# Add book
 @app.route("/add", methods=["GET", "POST"])
+@login_required
 def add_book():
     if request.method == "POST":
         title = request.form.get("title", "").strip()
         author = request.form.get("author", "").strip()
-        category = request.form.get("category", "").strip()
-        error = None
+        quantity = request.form.get(
+            "quantity", request.form.get("copies", "1")
+        )
 
         try:
-            available_copies = int(request.form.get("available_copies", 1) or 1)
+            quantity = int(quantity)
+            if not title or not author or quantity < 0:
+                flash("Please enter valid book details.")
+            else:
+                with get_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            INSERT INTO books (title, author, quantity)
+                            VALUES (%s, %s, %s)
+                        """, (title, author, quantity))
+
+                flash("Book added successfully!")
+                return redirect(url_for("books"))
+
         except ValueError:
-            available_copies = 1
+            flash("Quantity must be a valid number.")
+        except Exception:
+            app.logger.exception("Add book error")
+            flash("Could not add book. Please check the details.")
 
-        conn = None
-        try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO books (title, author, category, available_copies) VALUES (%s, %s, %s, %s)",
-                (title, author, category, available_copies)
-            )
-            conn.commit()
-            flash("Book added successfully!")
-            return redirect("/")
-        except Exception as err:
-            print("Add book error:", err)
-            error = str(err)
-        finally:
-            if conn is not None:
-                conn.close()
-        return render_template("add_book.html", error=error)
     return render_template("add_book.html")
 
 
-@app.route("/delete/<int:book_id>")
+# Delete book
+@app.route("/delete_book/<int:book_id>", methods=["POST", "GET"])
+@login_required
 def delete_book(book_id):
-    conn = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM books WHERE id = %s", (book_id,))
-        conn.commit()
-        flash("Book deleted successfully!")
-    except Exception as err:
-        print("Delete book error:", err)
-    finally:
-        if conn is not None:
-            conn.close()
-    return redirect("/")
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT COUNT(*) AS total FROM issue_return
+                    WHERE book_id = %s AND return_date IS NULL
+                """, (book_id,))
+                active = cur.fetchone()["total"]
+
+                if active:
+                    flash("Return this book before deleting it.")
+                else:
+                    cur.execute("DELETE FROM books WHERE id = %s", (book_id,))
+                    flash("Book deleted successfully.")
+
+    except Exception:
+        app.logger.exception("Delete book error")
+        flash("Could not delete this book.")
+
+    return redirect(url_for("books"))
 
 
-@app.route("/edit/<int:book_id>", methods=["GET", "POST"])
-def edit_book(book_id):
-    conn = None
-    error = None
-    book = None
-
-    if request.method == "POST":
-        title = request.form.get("title", "").strip()
-        author = request.form.get("author", "").strip()
-        category = request.form.get("category", "").strip()
-
-        try:
-            available_copies = int(request.form.get("available_copies", 1) or 1)
-        except ValueError:
-            available_copies = 1
-
-        try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE books SET title = %s, author = %s, category = %s, available_copies = %s WHERE id = %s",
-                (title, author, category, available_copies, book_id)
-            )
-            conn.commit()
-            flash("Book updated successfully!")
-            return redirect("/")
-        except Exception as err:
-            print("Edit book update error:", err)
-            error = str(err)
-        finally:
-            if conn is not None:
-                conn.close()
-
-        return render_template("edit_book.html", book=book, error=error)
-
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT title, author, category, available_copies FROM books WHERE id = %s",
-            (book_id,)
-        )
-        book = cursor.fetchone()
-        if book is None:
-            return redirect("/")
-    except Exception as err:
-        print("Edit book fetch error:", err)
-        error = str(err)
-    finally:
-        if conn is not None:
-            conn.close()
-
-    if error:
-        books, _ = get_books()
-        return render_template("index.html", books=books, error=error)
-
-    return render_template("edit_book.html", book=book)
-
-
-def get_members():
-    members = []
-    error = None
-    conn = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, name, email, phone, membership_date FROM members")
-        members = cursor.fetchall()
-    except Exception as err:
-        error = str(err)
-        print("Members database error:", error)
-    finally:
-        if conn is not None:
-            conn.close()
-    return members, error
-
-
+# View members
 @app.route("/members")
-def members_page():
-    members, error = get_members()
-    return render_template("member.html", members=members, error=error)
+@login_required
+def members():
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM members ORDER BY id DESC")
+            all_members = cur.fetchall()
+
+    return render_template("members.html", members=all_members)
 
 
-@app.route('/members/add', methods=['GET', 'POST'])
+# Add member
+@app.route("/add_member", methods=["GET", "POST"])
+@login_required
 def add_member():
-    if request.method == 'POST':
+    if request.method == "POST":
         name = request.form.get("name", "").strip()
         email = request.form.get("email", "").strip()
         phone = request.form.get("phone", "").strip()
-        membership_date = request.form.get("membership_date", "").strip()
 
-        if not name or not email or not phone or not membership_date:
-            return render_template("add_member.html", error="All fields are required.")
+        if not name:
+            flash("Member name is required.")
+        else:
+            try:
+                with get_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            INSERT INTO members (name, email, phone)
+                            VALUES (%s, %s, %s)
+                        """, (name, email, phone))
 
-        conn = None
-        try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO members (name, email, phone, membership_date) VALUES (%s, %s, %s, %s)",
-                (name, email, phone, membership_date)
-            )
-            conn.commit()
-            flash("Member added successfully!")
-            return redirect("/members")
-        except Exception as err:
-            print("Add member error:", err)
-            return render_template("add_member.html", error=str(err))
-        finally:
-            if conn is not None:
-                conn.close()
+                flash("Member added successfully!")
+                return redirect(url_for("members"))
+
+            except Exception:
+                app.logger.exception("Add member error")
+                flash("Could not add member.")
 
     return render_template("add_member.html")
-@app.route('/members/delete/<int:member_id>')
+
+
+# Delete member
+@app.route("/delete_member/<int:member_id>", methods=["POST", "GET"])
+@login_required
 def delete_member(member_id):
-    conn = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM members WHERE id = %s", (member_id,))
-        conn.commit()
-        flash("Member deleted successfully!")
-    except Exception as err:
-        print("Delete member error:", err)
-        flash("Unable to delete member.")
-    finally:
-        if conn is not None:
-            conn.close()
-    return redirect("/members")
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT COUNT(*) AS total FROM issue_return
+                    WHERE member_id = %s AND return_date IS NULL
+                """, (member_id,))
+                active = cur.fetchone()["total"]
+
+                if active:
+                    flash("This member has an unreturned book.")
+                else:
+                    cur.execute(
+                        "DELETE FROM members WHERE id = %s",
+                        (member_id,)
+                    )
+                    flash("Member deleted successfully.")
+
+    except Exception:
+        app.logger.exception("Delete member error")
+        flash("Could not delete this member.")
+
+    return redirect(url_for("members"))
 
 
-@app.route("/members/edit/<int:member_id>", methods=["GET", "POST"])
-def edit_member(member_id):
-    conn = None
-    error = None
+# Issue a book
+@app.route("/issue", methods=["GET", "POST"])
+@login_required
+def issue_book():
+    if request.method == "POST":
+        try:
+            book_id = int(request.form.get("book_id", "0"))
+            member_id = int(request.form.get("member_id", "0"))
+
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT id, quantity FROM books
+                        WHERE id = %s FOR UPDATE
+                    """, (book_id,))
+                    book = cur.fetchone()
+
+                    cur.execute(
+                        "SELECT id FROM members WHERE id = %s",
+                        (member_id,)
+                    )
+                    member = cur.fetchone()
+
+                    if not book or not member:
+                        flash("Please select a valid book and member.")
+                    elif book["quantity"] < 1:
+                        flash("This book is not available.")
+                    else:
+                        cur.execute("""
+                            INSERT INTO issue_return
+                                (book_id, member_id, issue_date)
+                            VALUES (%s, %s, CURRENT_DATE)
+                        """, (book_id, member_id))
+
+                        cur.execute("""
+                            UPDATE books SET quantity = quantity - 1
+                            WHERE id = %s
+                        """, (book_id,))
+
+                        flash("Book issued successfully!")
+                        return redirect(url_for("issued_books"))
+
+        except (ValueError, TypeError):
+            flash("Please select a valid book and member.")
+        except Exception:
+            app.logger.exception("Issue book error")
+            flash("Could not issue book.")
+
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM books ORDER BY title")
+            all_books = cur.fetchall()
+
+            cur.execute("SELECT * FROM members ORDER BY name")
+            all_members = cur.fetchall()
+
+    return render_template(
+        "issue.html", books=all_books, members=all_members
+    )
+
+
+# View issued and returned books
+@app.route("/issued")
+@login_required
+def issued_books():
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT ir.*, b.title AS book_title,
+                       m.name AS member_name
+                FROM issue_return ir
+                LEFT JOIN books b ON b.id = ir.book_id
+                LEFT JOIN members m ON m.id = ir.member_id
+                ORDER BY ir.id DESC
+            """)
+            records = cur.fetchall()
+
+    return render_template("issued.html", records=records, issues=records)
+
+
+# Return a book
+@app.route("/return/<int:issue_id>", methods=["POST", "GET"])
+@login_required
+def return_book(issue_id):
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, book_id, issue_date, return_date
+                    FROM issue_return
+                    WHERE id = %s FOR UPDATE
+                """, (issue_id,))
+                record = cur.fetchone()
+
+                if not record:
+                    flash("Issue record not found.")
+                elif record["return_date"] is not None:
+                    flash("This book has already been returned.")
+                else:
+                    cur.execute("""
+                        UPDATE issue_return
+                        SET return_date = CURRENT_DATE
+                        WHERE id = %s
+                    """, (issue_id,))
+
+                    cur.execute("""
+                        UPDATE books SET quantity = quantity + 1
+                        WHERE id = %s
+                    """, (record["book_id"],))
+
+                    flash("Book returned successfully!")
+
+    except Exception:
+        app.logger.exception("Return book error")
+        flash("Could not return book.")
+
+    return redirect(url_for("issued_books"))
+
+
+# Fine calculator
+@app.route("/fine", methods=["GET", "POST"])
+@login_required
+def fine_calculator():
+    fine = None
+    days_late = None
 
     if request.method == "POST":
-        name = request.form.get("name", "").strip()
-        email = request.form.get("email", "").strip()
-        phone = request.form.get("phone", "").strip()
-        membership_date = request.form.get("membership_date", "").strip()
-
-        if not name or not email or not phone or not membership_date:
-            return render_template("edit_member.html", member_id=member_id, error="All fields are required.")
+        issue_date = request.form.get("issue_date", "")
+        return_date = request.form.get("return_date", "")
+        daily_fine = request.form.get("daily_fine", "5")
 
         try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE members SET name = %s, email = %s, phone = %s, membership_date = %s WHERE id = %s",
-                (name, email, phone, membership_date, member_id)
-            )
-            conn.commit()
-            flash("Member updated successfully!")
-            return redirect("/members")
-        except Exception as err:
-            print("Edit member update error:", err)
-            error = str(err)
-        finally:
-            if conn is not None:
-                conn.close()
+            start = date.fromisoformat(issue_date)
+            end = date.fromisoformat(return_date)
+            rate = float(daily_fine)
 
-        return render_template("edit_member.html", member_id=member_id, error=error)
+            if rate < 0 or end < start:
+                raise ValueError
 
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, name, email, phone, membership_date FROM members WHERE id = %s", (member_id,))
-        member = cursor.fetchone()
-        if member is None:
-            return redirect("/members")
-    except Exception as err:
-        print("Edit member fetch error:", err)
-        error = str(err)
-    finally:
-        if conn is not None:
-            conn.close()
+            days_late = max((end - start).days - 14, 0)
+            fine = days_late * rate
 
-    if error:
-        members, _ = get_members()
-        return render_template("member.html", members=members, error=error)
-
-    return render_template("edit_member.html", member=member)
-# ================= ISSUE / RETURN =================
-
-@app.route("/issue", methods=["GET", "POST"])
-def issue_book():
-    conn = None
-    error = None
-
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Books with available copies
-        cursor.execute(
-            "SELECT id, title, available_copies FROM books WHERE available_copies > 0"
-        )
-        books = cursor.fetchall()
-
-        # All members
-        cursor.execute(
-            "SELECT id, name FROM members"
-        )
-        members = cursor.fetchall()
-
-        if request.method == "POST":
-            book_id = request.form.get("book_id")
-            member_id = request.form.get("member_id")
-            issue_date = request.form.get("issue_date")
-            due_date = request.form.get("due_date")
-
-            if not book_id or not member_id or not issue_date or not due_date:
-                return render_template(
-                    "issue_book.html",
-                    books=books,
-                    members=members,
-                    error="All fields are required."
-                )
-
-            # Add issue record
-            cursor.execute(
-                """
-                INSERT INTO issue_return
-                (book_id, member_id, issue_date, due_date)
-                VALUES (%s, %s, %s, %s)
-                """,
-                (book_id, member_id, issue_date, due_date)
-            )
-
-            # Decrease available copies
-            cursor.execute(
-                """
-                UPDATE books
-                SET available_copies = available_copies - 1
-                WHERE id = %s AND available_copies > 0
-                """,
-                (book_id,)
-            )
-
-            conn.commit()
-
-            flash("Book issued successfully!")
-            return redirect("/issue-return")
-
-    except Exception as err:
-        print("Issue book error:", err)
-        error = str(err)
-
-    finally:
-        if conn is not None:
-            conn.close()
+        except (ValueError, TypeError):
+            flash("Please enter valid dates and fine amount.")
 
     return render_template(
-        "issue_book.html",
-        books=books,
-        members=members,
-        error=error
+        "fine.html", fine=fine, days_late=days_late
     )
 
 
-@app.route("/return/<int:issue_id>")
-def return_book(issue_id):
-    conn = None
-
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Get book id of issued record
-        cursor.execute(
-            """
-            SELECT book_id
-            FROM issue_return
-            WHERE id = %s AND return_date IS NULL
-            """,
-            (issue_id,)
-        )
-
-        record = cursor.fetchone()
-
-        if record is None:
-            flash("Book already returned or record not found.")
-            return redirect("/issue-return")
-
-        book_id = record[0]
-
-        # Set return date
-        cursor.execute(
-            """
-            UPDATE issue_return
-            SET return_date = CURDATE()
-            WHERE id = %s
-            """,
-            (issue_id,)
-        )
-
-        # Increase available copies
-        cursor.execute(
-            """
-            UPDATE books
-            SET available_copies = available_copies + 1
-            WHERE id = %s
-            """,
-            (book_id,)
-        )
-
-        conn.commit()
-
-        flash("Book returned successfully!")
-
-    except Exception as err:
-        print("Return book error:", err)
-        flash("Unable to return book.")
-
-    finally:
-        if conn is not None:
-            conn.close()
-
-    return redirect("/issue-return")
-
-
-@app.route("/issue-return")
-def issue_return_page():
-    records = []
-    error = None
-    conn = None
-
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            SELECT
-                issue_return.id,
-                books.title,
-                members.name,
-                issue_return.issue_date,
-                issue_return.due_date,
-                issue_return.return_date
-            FROM issue_return
-            JOIN books ON issue_return.book_id = books.id
-            JOIN members ON issue_return.member_id = members.id
-            ORDER BY issue_return.id DESC
-            """
-        )
-
-        records = cursor.fetchall()
-
-    except Exception as err:
-        print("Issue-return database error:", err)
-        error = str(err)
-
-    finally:
-        if conn is not None:
-            conn.close()
-
-    return render_template(
-        "issue_return.html",
-        records=records,
-        error=error
-    )
-@app.route("/dashboard")
-def dashboard():
-    conn = None
-    stats = {
-        "total_books": 0,
-        "total_members": 0,
-        "issued_books": 0,
-        "returned_books": 0
-    }
-    error = None
-
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("SELECT COUNT(*) FROM books")
-        stats["total_books"] = cursor.fetchone()[0]
-
-        cursor.execute("SELECT COUNT(*) FROM members")
-        stats["total_members"] = cursor.fetchone()[0]
-
-        cursor.execute(
-            "SELECT COUNT(*) FROM issue_return WHERE return_date IS NULL"
-        )
-        stats["issued_books"] = cursor.fetchone()[0]
-
-        cursor.execute(
-            "SELECT COUNT(*) FROM issue_return WHERE return_date IS NOT NULL"
-        )
-        stats["returned_books"] = cursor.fetchone()[0]
-
-    except Exception as err:
-        print("Dashboard error:", err)
-        error = str(err)
-
-    finally:
-        if conn is not None:
-            conn.close()
-
-    return render_template(
-        "dashboard.html",
-        stats=stats,
-        error=error
-    )
-@app.route("/search")
-def search_books():
-    query = request.args.get("q", "").strip()
-    books = []
-    error = None
-    conn = None
-
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        if query:
-            cursor.execute(
-                """
-                SELECT id, title, author, category, available_copies
-                FROM books
-                WHERE title LIKE %s
-                   OR author LIKE %s
-                   OR category LIKE %s
-                """,
-                (f"%{query}%", f"%{query}%", f"%{query}%")
-            )
-        else:
-            cursor.execute(
-                "SELECT id, title, author, category, available_copies FROM books"
-            )
-
-        books = cursor.fetchall()
-
-    except Exception as err:
-        print("Search error:", err)
-        error = str(err)
-
-    finally:
-        if conn is not None:
-            conn.close()
-
-    return render_template(
-        "search.html",
-        books=books,
-        query=query,
-        error=error
-    )
-@app.route("/fine-calculator")
-def fine_calculator():
-    return render_template("fine_calculator.html")
-
-
+# Start the app
 if __name__ == "__main__":
-    app.run(debug=True)
+    init_db()
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 2222)))
