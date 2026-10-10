@@ -15,80 +15,13 @@ app.secret_key = os.environ.get("SECRET_KEY", "library-project-secret-key")
 
 # PostgreSQL connection on Render
 def get_db_connection():
-    database_url = os.environ.get("DATABASE_URL")
-
-    if not database_url:
-        raise RuntimeError(
-            "DATABASE_URL is missing. Set it in Render Environment."
-        )
-
-    return psycopg.connect(
-        database_url,
-        sslmode="require",
-        row_factory=dict_row
+    return mysql.connector.connect(
+        host="localhost",
+        user="root",
+        password="",
+        database="library_db",
+        use_pure=True  # required on Python 3.14: C extension segfaults during connect
     )
-
-
-# Create tables if they do not exist
-def init_db():
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    id SERIAL PRIMARY KEY,
-                    username VARCHAR(100) UNIQUE NOT NULL,
-                    password VARCHAR(255) NOT NULL
-                )
-            """)
-
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS books (
-                    id SERIAL PRIMARY KEY,
-                    title VARCHAR(200) NOT NULL,
-                    author VARCHAR(200) NOT NULL,
-                    quantity INTEGER NOT NULL DEFAULT 1
-                )
-            """)
-
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS members (
-                    id SERIAL PRIMARY KEY,
-                    name VARCHAR(200) NOT NULL,
-                    email VARCHAR(200),
-                    phone VARCHAR(30)
-                )
-            """)
-
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS issue_return (
-                    id SERIAL PRIMARY KEY,
-                    book_id INTEGER REFERENCES books(id),
-                    member_id INTEGER REFERENCES members(id),
-                    issue_date DATE DEFAULT CURRENT_DATE,
-                    return_date DATE,
-                    fine NUMERIC(10, 2) DEFAULT 0
-                )
-            """)
-
-
-# Login protection
-def login_required(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if "username" not in session:
-            return redirect(url_for("login"))
-        return func(*args, **kwargs)
-    return wrapper
-
-
-@app.route("/")
-def home():
-    if "username" in session:
-        return redirect(url_for("dashboard"))
-    return redirect(url_for("login"))
-
-
-# Login
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -465,12 +398,57 @@ def fine_calculator():
             flash("Please enter valid dates and fine amount.")
 
     return render_template(
-        "fine.html", fine=fine, days_late=days_late
+        "dashboard.html",
+        stats=stats,
+        error=error
     )
+@app.route("/search")
+def search_books():
+    query = request.args.get("q", "").strip()
+    books = []
+    error = None
+    conn = None
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        if query:
+            cursor.execute(
+                """
+                SELECT id, title, author, category, available_copies
+                FROM books
+                WHERE title LIKE %s
+                   OR author LIKE %s
+                   OR category LIKE %s
+                """,
+                (f"%{query}%", f"%{query}%", f"%{query}%")
+            )
+        else:
+            cursor.execute(
+                "SELECT id, title, author, category, available_copies FROM books"
+            )
+
+        books = cursor.fetchall()
+
+    except Exception as err:
+        print("Search error:", err)
+        error = str(err)
+
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return render_template(
+        "search.html",
+        books=books,
+        query=query,
+        error=error
+    )
+@app.route("/fine-calculator")
+def fine_calculator():
+    return render_template("fine_calculator.html")
 
 
-# Start the app
-init_db()
 if __name__ == "__main__":
-    
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 2222)))
+    app.run(debug=True)
