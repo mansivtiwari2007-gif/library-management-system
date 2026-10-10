@@ -1,5 +1,4 @@
 import os
-from datetime import date
 from functools import wraps
 
 import psycopg
@@ -383,37 +382,6 @@ def return_book(issue_id):
     return redirect(url_for("issued_books"))
 
 
-# Fine calculator
-@app.route("/fine", methods=["GET", "POST"])
-@login_required
-def fine_calculator():
-    fine = None
-    days_late = None
-
-    if request.method == "POST":
-        issue_date = request.form.get("issue_date", "")
-        return_date = request.form.get("return_date", "")
-        daily_fine = request.form.get("daily_fine", "5")
-
-        try:
-            start = date.fromisoformat(issue_date)
-            end = date.fromisoformat(return_date)
-            rate = float(daily_fine)
-
-            if rate < 0 or end < start:
-                raise ValueError
-
-            days_late = max((end - start).days - 14, 0)
-            fine = days_late * rate
-
-        except (ValueError, TypeError):
-            flash("Please enter valid dates and fine amount.")
-
-    return render_template(
-        "dashboard.html",
-        stats=stats,
-        error=error
-    )
 @app.route("/search")
 def search_books():
     query = request.args.get("q", "").strip()
