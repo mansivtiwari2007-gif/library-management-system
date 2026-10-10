@@ -22,6 +22,18 @@ def get_db_connection():
         database="library_db",
         use_pure=True  # required on Python 3.14: C extension segfaults during connect
     )
+
+
+# Login protection
+def login_required(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if "username" not in session:
+            return redirect(url_for("login"))
+        return func(*args, **kwargs)
+    return wrapper
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
