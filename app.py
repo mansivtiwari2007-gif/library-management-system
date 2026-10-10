@@ -14,12 +14,17 @@ app.secret_key = os.environ.get("SECRET_KEY", "library-project-secret-key")
 
 # PostgreSQL connection on Render
 def get_db_connection():
-    return mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="",
-        database="library_db",
-        use_pure=True  # required on Python 3.14: C extension segfaults during connect
+    database_url = os.environ.get("DATABASE_URL")
+
+    if not database_url:
+        raise RuntimeError(
+            "DATABASE_URL is missing. Set it in Render Environment."
+        )
+
+    return psycopg.connect(
+        database_url,
+        sslmode="require",
+        row_factory=dict_row
     )
 
 
@@ -31,6 +36,11 @@ def login_required(func):
             return redirect(url_for("login"))
         return func(*args, **kwargs)
     return wrapper
+
+
+@app.route("/")
+def home():
+    return redirect(url_for("login"))
 
 
 @app.route("/login", methods=["GET", "POST"])
